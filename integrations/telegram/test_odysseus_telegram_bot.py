@@ -171,6 +171,64 @@ class HelperTests(unittest.TestCase):
         self.assertEqual(cfg.odysseus_url, "http://odysseus:7000")
         self.assertFalse(botmod.Config.from_env({}).configured)
 
+    def test_config_problems(self):
+        tg_token = "123456789:AAH" + "x" * 32
+
+        def problems(**env):
+            return botmod.Config.from_env(env).problems()
+
+        self.assertEqual(problems(TELEGRAM_BOT_TOKEN=tg_token, ODYSSEUS_TOKEN="ody_abc"), [])
+        self.assertEqual(len(problems()), 2)
+        same = problems(TELEGRAM_BOT_TOKEN=tg_token, ODYSSEUS_TOKEN=tg_token)
+        self.assertEqual(len(same), 1)
+        self.assertIn("is the Telegram bot token", same[0])
+        self.assertIn("starting with ody_", problems(TELEGRAM_BOT_TOKEN=tg_token, ODYSSEUS_TOKEN="abc")[0])
+        self.assertIn("BotFather", problems(TELEGRAM_BOT_TOKEN="ody_wrong", ODYSSEUS_TOKEN="ody_abc")[0])
+
+
+class PollingTests(unittest.TestCase):
+    class ScriptedTelegram(FakeTelegram):
+        """getUpdates replays a script of results / exceptions."""
+
+        def __init__(self, script):
+            super().__init__()
+            self.script = list(script)
+            self.polls = 0
+
+        def call(self, method, payload=None, timeout=30):
+            if method != "getUpdates":
+                return {}
+            self.polls += 1
+            item = self.script.pop(0) if self.script else []
+            if isinstance(item, Exception):
+                raise item
+            return item
+
+    def _bot(self, script):
+        bot, _, _ = make_bot()
+        bot.tg = self.ScriptedTelegram(script)
+        return bot
+
+    def test_gives_up_on_token_conflict(self):
+        conflict = botmod.TelegramError(409, "Conflict: terminated by other getUpdates request")
+        bot = self._bot([conflict] * 10)
+        stop = threading.Event()
+        stop.wait = lambda timeout=None: False  # no real sleeping between retries
+        with self.assertLogs("odysseus-telegram", level="ERROR") as logs:
+            bot.poll_forever(stop)
+        self.assertEqual(bot.tg.polls, botmod.MAX_POLL_CONFLICTS)
+        self.assertFalse(bot.polling)
+        self.assertIn("BotFather", "\n".join(logs.output))
+
+    def test_conflict_counter_resets_after_success(self):
+        conflict = botmod.TelegramError(409, "Conflict: terminated by other getUpdates request")
+        script = [conflict, conflict, [], conflict, conflict, [], conflict, conflict, conflict]
+        bot = self._bot(script)
+        stop = threading.Event()
+        stop.wait = lambda timeout=None: False
+        bot.poll_forever(stop)
+        self.assertEqual(bot.tg.polls, len(script))
+
 
 class AuthorizationTests(unittest.TestCase):
     def test_unauthorized_chat_is_ignored_when_not_pairing(self):

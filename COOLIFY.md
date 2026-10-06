@@ -73,7 +73,10 @@ SearXNG ayar şablonu, migration betiği ve Telegram botu.
 | Sohbette `Unsupported parameter: temperature` | ChatGPT Subscription'da `gpt-6*` modeli seçili. `gpt-5.6-*` seç |
 | `ChatGPT Subscription quota or rate limit was reached` | Plus kotası doldu (Codex ile paylaşılıyor). Sıfırlanmasını bekle |
 | Admin şifresi değişkenden değişmiyor | Beklenen davranış. Değişken sadece ilk açılışta okunur; şifreyi uygulama içinden değiştir |
-| Telegram botu cevap vermiyor | Coolify'da `telegram-bot` loglarına bak. `Idle:` satırı token eksik demektir. `PAIRING MODE` satırı eşleştirme bekleniyor demektir |
+| Telegram botu cevap vermiyor | Coolify'da `telegram-bot` loglarına bak. `Idle:` satırları token'ın eksik ya da yanlış olduğunu söyler. `PAIRING MODE` satırı eşleştirme bekleniyor demektir |
+| Bot logunda `409 Conflict: terminated by other getUpdates request`, ardından "Stopped polling" | Aynı bot token'ını başka bir program (örn. OpenClaw) dinliyor. BotFather'dan Odysseus için ayrı bir bot aç |
+| Integrations ekranında `JSON.parse: unexpected character` ve "No integrations configured" | Uygulama o sırada yeniden başlıyordu (Redeploy). Bir dakika bekleyip sayfayı yenile; entegrasyonlar silinmez |
+| Traefik logunda `Unable to obtain ACME certificate ... www.odysseus.burakkaan.dev` | DNS kaydı olmayan ek bir domain tanımlı. Ya Domains'ten kaldır ya da DNS kaydını ekle |
 
 Boş klasörleri silmek için (sunucuda; `<uuid>`, Coolify'daki uygulama
 UUID'si). `rmdir` yalnızca boş klasörleri siler, `data/`'ya dokunmaz:
@@ -92,7 +95,9 @@ Odysseus bir **MCP istemcisidir**; dışarıdaki MCP sunucularına bağlanabilir
 Kendisi MCP sunucusu olarak dışarıya açılmaz. Harici ajanlar `/api/codex/*`
 HTTP API'sini kullanır.
 
-**Ekleme:** **Settings → Integrations → Add Integration → MCP Tool Server**
+**Ekleme:** **Settings → Integrations → Add Integration → MCP Tool Server**.
+Menüdeki diğer türler: API Service, CalDAV Calendar, Claude Agent, Codex Agent,
+Contacts (CardDAV), Contacts Import, Email (IMAP/SMTP).
 ("Add MCP Server" formu)
 
 | Alan | Açıklama |

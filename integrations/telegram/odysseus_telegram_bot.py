@@ -52,6 +52,11 @@ MAX_TURN_USER_CHARS = 2_000
 MAX_TURN_ASSISTANT_CHARS = 3_000
 PAIRING_MAX_FAILURES = 10
 REMINDER_MAX_BODY = 64 * 1024
+# Consecutive "terminated by other getUpdates request" conflicts before the
+# bot stops polling, so it never fights another program (e.g. OpenClaw) that
+# long-polls the same bot token.
+MAX_POLL_CONFLICTS = 3
+TELEGRAM_TOKEN_RE = re.compile(r"\d{5,}:[A-Za-z0-9_-]{30,}")
 
 TR_WEEKDAYS = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"]
 TR_WEEKDAYS_SHORT = ["Pzt", "Sal", "Çar", "Per", "Cum", "Cmt", "Paz"]
@@ -181,6 +186,24 @@ class Config:
     @property
     def configured(self) -> bool:
         return bool(self.telegram_token and self.odysseus_token)
+
+    def problems(self) -> list[str]:
+        """Human-readable configuration errors that must stop the bot."""
+        issues = []
+        if not self.telegram_token:
+            issues.append("TELEGRAM_BOT_TOKEN is not set")
+        elif not TELEGRAM_TOKEN_RE.fullmatch(self.telegram_token):
+            issues.append("TELEGRAM_BOT_TOKEN does not look like a BotFather token (<digits>:<secret>)")
+        if not self.odysseus_token:
+            issues.append("ODYSSEUS_TOKEN (Coolify: TELEGRAM_ODYSSEUS_TOKEN) is not set")
+        elif self.odysseus_token == self.telegram_token:
+            issues.append(
+                "ODYSSEUS_TOKEN is the Telegram bot token; it must be an Odysseus API token "
+                "(ody_..., Settings → Integrations → Add Integration → Claude Agent)"
+            )
+        elif not self.odysseus_token.startswith("ody_"):
+            issues.append("ODYSSEUS_TOKEN must be an Odysseus API token starting with ody_")
+        return issues
 
 
 def load_timezone(name: str) -> dt.tzinfo:
@@ -769,6 +792,7 @@ class Bot:
         self.runner = ActionRunner(self.ody, self.tz)
         self.clock = clock or (lambda: dt.datetime.now(self.tz))
         self.chat_locks: dict[int, threading.Lock] = {}
+        self.polling = False
         self.pairing_failures = 0
         self.pairing_code = ""
         if self.pairing_active:
@@ -979,8 +1003,17 @@ class Bot:
             log.info("Authorized chats: %s", ", ".join(str(c) for c in sorted(self.allowed_chats)))
 
     def poll_forever(self, stop: threading.Event) -> None:
+        """Long-poll Telegram until stopped. Returns early on a token conflict."""
         self.announce()
+        self.polling = True
+        try:
+            self._poll_loop(stop)
+        finally:
+            self.polling = False
+
+    def _poll_loop(self, stop: threading.Event) -> None:
         backoff = 1.0
+        conflicts = 0
         while not stop.is_set():
             try:
                 updates = self.tg.call(
@@ -989,8 +1022,20 @@ class Bot:
                     timeout=40,
                 )
                 backoff = 1.0
+                conflicts = 0
             except TelegramError as exc:
-                if exc.code == 409 and "webhook" in exc.description.lower():
+                if exc.code == 409 and "other getupdates" in exc.description.lower():
+                    conflicts += 1
+                    if conflicts >= MAX_POLL_CONFLICTS:
+                        log.error(
+                            "Another program is polling this bot token (for example OpenClaw), so "
+                            "the two would keep disconnecting each other. Stopped polling. Create a "
+                            "separate bot with @BotFather for Odysseus, set it as TELEGRAM_BOT_TOKEN "
+                            "and redeploy."
+                        )
+                        return
+                    log.warning("Telegram polling conflict %d/%d: %s", conflicts, MAX_POLL_CONFLICTS, exc)
+                elif exc.code == 409 and "webhook" in exc.description.lower():
                     log.warning("A Telegram webhook is set; removing it so long polling works")
                     try:
                         self.tg.call("deleteWebhook")
@@ -1056,7 +1101,15 @@ def make_http_handler(bot: Bot) -> type:
         def do_GET(self) -> None:  # noqa: N802 (http.server API)
             path = self.path.split("?", 1)[0]
             if path == "/health":
-                self._send(200, {"ok": True, "configured": bot.cfg.configured, "pairing": bot.pairing_active})
+                self._send(
+                    200,
+                    {
+                        "ok": True,
+                        "configured": not bot.cfg.problems(),
+                        "polling": bot.polling,
+                        "pairing": bot.pairing_active,
+                    },
+                )
             elif path in ("/reminder", "/notify"):
                 # Lets the Odysseus "API Integration" Test button succeed.
                 if not self._authorized():
@@ -1142,17 +1195,19 @@ def main() -> int:
     start_http_server(bot)
     stop = threading.Event()
 
-    missing = [
-        name
-        for name, value in (("TELEGRAM_BOT_TOKEN", cfg.telegram_token), ("ODYSSEUS_TOKEN", cfg.odysseus_token))
-        if not value
-    ]
-    if missing:
-        log.warning("Idle: %s not set. Set them in Coolify and redeploy to enable the bot.", ", ".join(missing))
+    problems = cfg.problems()
+    if problems:
+        level = logging.WARNING if not cfg.telegram_token and not cfg.odysseus_token else logging.ERROR
+        for problem in problems:
+            log.log(level, "Idle: %s.", problem)
+        log.log(level, "Fix the variables in Coolify and redeploy to enable the bot.")
         stop.wait()
         return 0
     try:
         bot.poll_forever(stop)
+        # Polling gave up (token conflict); keep the health endpoint up and idle
+        # instead of exiting into a restart loop that would poll again.
+        stop.wait()
     except (KeyboardInterrupt, SystemExit):
         pass
     return 0

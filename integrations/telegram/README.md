@@ -22,6 +22,12 @@ yoktur, `python:3.12-slim` üzerinde çalışır.
 2. `/newbot` yaz; bota bir ad ve `_bot` ile biten bir kullanıcı adı ver.
 3. BotFather'ın verdiği token'ı kopyala. `123456:ABC...` biçimindedir.
 
+⚠️ **Odysseus için yeni, ayrı bir bot aç.** OpenClaw gibi başka bir programın
+kullandığı bot token'ını kullanma. Telegram'da bir botu aynı anda tek program
+dinleyebilir; iki program aynı token'ı dinlerse birbirlerinin bağlantısını
+koparırlar (`409 Conflict: terminated by other getUpdates request`). Bot bunu
+fark edince 3 denemeden sonra kendini durdurur ve loga uyarı yazar.
+
 ### 2. Odysseus'ta bot için token oluştur
 
 **Settings → Integrations → Add Integration → Claude Agent** yolunu izle.
@@ -38,8 +44,14 @@ yoktur, `python:3.12-slim` üzerinde çalışır.
 
 Sohbet için gereken `chat` yetkisi bu entegrasyon türünde zaten var.
 
-Token yalnızca bir kez gösterilir; kopyala. Claude Code için oluşturduğun token'ı
-burada kullanma, bot için ayrı ve daha dar yetkili bir token aç.
+**Create token**'a bas, izinleri ayarla ve **Save** ile kaydet. Token `ody_...`
+ile başlar ve yalnızca bir kez gösterilir; kopyala. Claude Code için
+oluşturduğun token'ı burada kullanma, bot için ayrı ve daha dar yetkili bir
+token aç.
+
+"JSON.parse: unexpected character" hatası alırsan uygulama o sırada yeniden
+başlıyordur (örneğin bir Redeploy sırasında). Bir dakika bekle, sayfayı yenile
+ve tekrar dene.
 
 ### 3. Coolify'da değişkenleri gir
 
@@ -47,8 +59,8 @@ Uygulamanın **Environment Variables** sekmesinde:
 
 | Değişken | Değer | Zorunlu |
 |---|---|---|
-| `TELEGRAM_BOT_TOKEN` | BotFather'dan aldığın token | ✅ |
-| `TELEGRAM_ODYSSEUS_TOKEN` | 2. adımdaki `ody_...` token | ✅ |
+| `TELEGRAM_BOT_TOKEN` | BotFather'dan aldığın token (`123456:ABC...`) | ✅ |
+| `TELEGRAM_ODYSSEUS_TOKEN` | 2. adımdaki Odysseus token'ı. **`ody_` ile başlamalı**; Telegram token'ı değil | ✅ |
 | `TELEGRAM_ODYSSEUS_MODEL` | Varsayılan `gpt-5.6-sol`. Değiştirmek istersen başka bir model adı | – |
 | `TELEGRAM_ALLOWED_CHAT_IDS` | Kendi chat ID'n. Boş bırakırsan eşleştirme kullanılır (4. adım) | – |
 | `TELEGRAM_REMINDER_SECRET` | Hatırlatma webhook'u için rastgele bir gizli değer (5. adım) | – |
@@ -60,8 +72,9 @@ Uygulamanın **Environment Variables** sekmesinde:
 openssl rand -hex 32
 ```
 
-Kaydet ve **Redeploy** et. Bu iki zorunlu değişken boşken servis sessizce
-bekler ve uygulamanın geri kalanını etkilemez.
+Kaydet ve **Redeploy** et. Bu iki zorunlu değişken boşken ya da yanlış
+biçimdeyken servis Telegram'a bağlanmadan bekler ve uygulamanın geri kalanını
+etkilemez. Logda neyin eksik olduğu `Idle: ...` satırlarında yazar.
 
 ### 4. Botu kendi hesabınla eşleştir
 
@@ -85,7 +98,7 @@ Kodla uğraşmak istemezsen `/kimim` yazıp chat ID'ni öğren,
 
 Odysseus'ta iki ayar yapılacak.
 
-**Entegrasyonu ekle:** **Settings → Integrations → Add Integration → API**
+**Entegrasyonu ekle:** **Settings → Integrations → Add Integration → API Service**
 
 | Alan | Değer |
 |---|---|
