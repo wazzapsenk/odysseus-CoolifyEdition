@@ -2,8 +2,12 @@
 # is left untouched so "Sync fork" stays conflict-free).
 #
 # Deploy with Coolify's Docker Compose build pack (Git-based), compose
-# location /docker-compose.coolify.yml. Relative mounts resolve from the
-# cloned repo. Differences from upstream docker-compose.yml:
+# location /docker-compose.coolify.yml, with "Preserve repository during
+# deployment" ENABLED (Configuration → General). Without it Coolify only
+# clones into a throw-away build container, so the file bind mounts below
+# (searxng settings/migration script, Telegram bot) turn into empty
+# directories and searxng never becomes healthy. See COOLIFY.md.
+# Differences from upstream docker-compose.yml:
 #   - odysseus: no `build: .` — app code always comes from the GHCR image
 #     pinned via ODYSSEUS_IMAGE. No host `ports`; `expose: 7000` only, and
 #     Coolify's Traefik routes https://odysseus.burakkaan.dev to it.
@@ -16,6 +20,11 @@
 #   - Env defaults for the public HTTPS origin: ALLOWED_ORIGINS,
 #     SECURE_COOKIES=true, OAUTH_REDIRECT_BASE_URL. ODYSSEUS_TTS_CACHE_MAX_BYTES
 #     gets an empty default (the app then falls back to 500 MB).
+#   - npm_config_cache points into ./data so npx-based MCP servers (e.g. the
+#     built-in Playwright browser) survive redeploys instead of re-downloading.
+#   - Extra telegram-bot service (integrations/telegram): chat with Odysseus
+#     and manage reminders/calendar/memory from Telegram. It idles until
+#     TELEGRAM_BOT_TOKEN and TELEGRAM_ODYSSEUS_TOKEN are set.
 services:
   odysseus:
     # Official multi-arch GHCR image (linux/amd64 + linux/arm64), published by
@@ -102,6 +111,9 @@ services:
       # Find yours with:  id -u  /  id -g
       - PUID=${PUID:-1000}
       - PGID=${PGID:-1000}
+      # Coolify recreates the container on every deploy and /app/.npm is not
+      # mounted, so keep npm/npx's cache on the persisted data volume.
+      - npm_config_cache=/app/data/npm-cache
     depends_on:
       searxng:
         condition: service_healthy
@@ -170,6 +182,54 @@ services:
       start_period: 10s
     restart: unless-stopped
 
+  telegram-bot:
+    # Telegram <-> Odysseus bridge (fork-only; integrations/telegram). Stdlib
+    # Python on a stock image, no build. Long-polls Telegram, so it needs no
+    # domain or published port. :8088 (/reminder, /health) is reachable only
+    # on the compose network, for Odysseus' "Webhook" reminder channel.
+    image: docker.io/library/python:3.12-slim
+    command: ["python", "-u", "/bot/odysseus_telegram_bot.py"]
+    expose:
+      - "8088"
+    volumes:
+      - ./integrations/telegram/odysseus_telegram_bot.py:/bot/odysseus_telegram_bot.py:ro
+      - telegram-bot-data:/data
+    environment:
+      # From @BotFather. Empty = the service idles.
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      # Odysseus API token (Settings → Integrations → Claude Agent) with the
+      # chat scope plus the todos/calendar/memory scopes the bot should use.
+      - ODYSSEUS_TOKEN=${TELEGRAM_ODYSSEUS_TOKEN:-}
+      # Pin a model: ChatGPT Subscription gpt-6* currently fails on
+      # /api/v1/chat ("Unsupported parameter: temperature").
+      - ODYSSEUS_MODEL=${TELEGRAM_ODYSSEUS_MODEL:-gpt-5.6-sol}
+      - ODYSSEUS_URL=http://odysseus:7000
+      # Comma-separated Telegram chat ids. Empty = one-time pairing: the code
+      # is printed in this service's logs; send "/eslestir CODE" to the bot.
+      - TELEGRAM_ALLOWED_CHAT_IDS=${TELEGRAM_ALLOWED_CHAT_IDS:-}
+      # Optional bearer secret the Odysseus reminder webhook must send.
+      - TELEGRAM_REMINDER_SECRET=${TELEGRAM_REMINDER_SECRET:-}
+      - BOT_TIMEZONE=${BOT_TIMEZONE:-Europe/Istanbul}
+      - PYTHONDONTWRITEBYTECODE=1
+    depends_on:
+      odysseus:
+        condition: service_started
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8088/health', timeout=3).read(1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
 volumes:
   searxng-data:
   chromadb-data:
+  telegram-bot-data:
