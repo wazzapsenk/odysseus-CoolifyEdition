@@ -4,8 +4,8 @@
 # Deploy with Coolify's Docker Compose build pack (Git-based), compose
 # location /docker-compose.coolify.yml, with "Preserve repository during
 # deployment" ENABLED (Configuration → General). Without it Coolify only
-# clones into a throw-away build container, so the file bind mounts below
-# (searxng settings/migration script, Telegram bot) turn into empty
+# clones into a throw-away build container, so the repo bind mounts below
+# (searxng settings/migration script, Telegram bot directory) turn into empty
 # directories and searxng never becomes healthy. See COOLIFY.md.
 # Differences from upstream docker-compose.yml:
 #   - odysseus: no `build: .` — app code always comes from the GHCR image
@@ -192,7 +192,12 @@ services:
     expose:
       - "8088"
     volumes:
-      - ./integrations/telegram/odysseus_telegram_bot.py:/bot/odysseus_telegram_bot.py:ro
+      # Mount the directory, not the single file: Coolify registers a new
+      # string-form bind mount as a directory, so a file mount would become an
+      # empty directory on the first deploy (the same trap as the searxng
+      # mounts). A directory mount is created as such and then filled by the
+      # preserved repository copy.
+      - ./integrations/telegram:/bot:ro
       - telegram-bot-data:/data
     environment:
       # From @BotFather. Empty = the service idles.
