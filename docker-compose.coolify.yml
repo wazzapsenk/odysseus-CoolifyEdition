@@ -1,0 +1,243 @@
+# Coolify deployment of Odysseus (fork-only file; upstream docker-compose.yml
+# is left untouched so "Sync fork" stays conflict-free).
+#
+# Deploy with Coolify's Docker Compose build pack (Git-based), compose
+# location /docker-compose.coolify.yml, with "Preserve repository during
+# deployment" ENABLED (Configuration → General). Without it Coolify only
+# clones into a throw-away build container, so the repo bind mounts below
+# (searxng settings/migration script, Telegram bot directory) turn into empty
+# directories and searxng never becomes healthy. See COOLIFY.md.
+# Differences from upstream docker-compose.yml:
+#   - odysseus: no `build: .` — app code always comes from the GHCR image
+#     pinned via ODYSSEUS_IMAGE. No host `ports`; `expose: 7000` only, and
+#     Coolify's Traefik routes your public domain to it.
+#   - chromadb / searxng: no host `ports`; reached over the compose network
+#     as chromadb:8000 and searxng:8080.
+#   - Volume paths are plain ./data and ./logs (no ${APP_DATA_DIR:-...}
+#     defaults, which Coolify's parser can choke on); `:z` SELinux suffixes
+#     dropped, `:ro` kept.
+#   - ntfy service and ntfy-cache volume removed.
+#   - SECURE_COOKIES defaults to true (HTTPS behind Traefik). ALLOWED_ORIGINS
+#     and OAUTH_REDIRECT_BASE_URL come from Coolify env, not from this file.
+#     ODYSSEUS_TTS_CACHE_MAX_BYTES gets an empty default (the app then falls
+#     back to 500 MB).
+#   - npm_config_cache points into ./data so npx-based MCP servers (e.g. the
+#     built-in Playwright browser) survive redeploys instead of re-downloading.
+#   - Extra telegram-bot service (integrations/telegram): chat with Odysseus
+#     and manage reminders/calendar/memory from Telegram. It idles until
+#     TELEGRAM_BOT_TOKEN and TELEGRAM_ODYSSEUS_TOKEN are set.
+services:
+  odysseus:
+    # Official multi-arch GHCR image (linux/amd64 + linux/arm64), published by
+    # the "ci / docker publish" workflow on every push to main and dev.
+    # Pin an immutable tag via ODYSSEUS_IMAGE in Coolify — e.g.
+    # ghcr.io/odysseus-dev/odysseus:1.0.2-7c8070f (X.Y.Z-<sha>) — since
+    # :latest and bare :X.Y.Z tags move on every main push.
+    image: ${ODYSSEUS_IMAGE:-ghcr.io/odysseus-dev/odysseus:latest}
+    expose:
+      - "7000"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      # Cookbook remote-server SSH identity. Odysseus can generate a key here;
+      # add the shown public key to each remote server's authorized_keys.
+      - ./data/ssh:/app/.ssh
+      # Cookbook local model cache. Inside Docker, "Local" means the Odysseus
+      # container, so persist its HuggingFace cache under ./data/huggingface.
+      - ./data/huggingface:/app/.cache/huggingface
+      # Cookbook-installed Python CLIs/packages (vLLM, llama-cpp-python, etc.)
+      # land under /app/.local for the odysseus user. Persist them so a
+      # container recreate does not silently remove installed serve engines.
+      - ./data/local:/app/.local
+    extra_hosts:
+      # Lets the container reach local services on the Docker host, including
+      # Ollama at http://host.docker.internal:11434.
+      - "host.docker.internal:host-gateway"
+    environment:
+      - LLM_HOST=${LLM_HOST:-localhost}
+      - LLM_HOSTS=${LLM_HOSTS:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-}
+      - RESEARCH_LLM_ENDPOINT=${RESEARCH_LLM_ENDPOINT:-}
+      - HF_TOKEN=${HF_TOKEN:-}
+      - HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_HUB_TOKEN:-}
+      - SEARXNG_INSTANCE=http://searxng:8080
+      - CHROMADB_HOST=chromadb
+      - CHROMADB_PORT=8000
+      - DATABASE_URL=${DATABASE_URL:-sqlite:///./data/app.db}
+      - AUTH_ENABLED=${AUTH_ENABLED:-true}
+      - LOCALHOST_BYPASS=${LOCALHOST_BYPASS:-false}
+      - COMPANION_BASE_URL=${COMPANION_BASE_URL:-}
+      - ODYSSEUS_ADMIN_USER=${ODYSSEUS_ADMIN_USER:-admin}
+      - ODYSSEUS_ADMIN_PASSWORD=${ODYSSEUS_ADMIN_PASSWORD:-}
+      # Set ALLOWED_ORIGINS / OAUTH_REDIRECT_BASE_URL to your public origin
+      # (https://your-domain) in Coolify; no domain is hard-coded here.
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-}
+      - SECURE_COOKIES=${SECURE_COOKIES:-true}
+      - EMBEDDING_URL=${EMBEDDING_URL:-}
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-}
+      - EMBEDDING_API_KEY=${EMBEDDING_API_KEY:-}
+      - FASTEMBED_MODEL=${FASTEMBED_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
+      - FASTEMBED_CACHE_PATH=${FASTEMBED_CACHE_PATH:-}
+      - CLEANUP_INTERVAL_HOURS=${CLEANUP_INTERVAL_HOURS:-24}
+      - ODYSSEUS_INPROCESS_POLLERS=${ODYSSEUS_INPROCESS_POLLERS:-1}
+      - ODYSSEUS_INPROCESS_TASKS=${ODYSSEUS_INPROCESS_TASKS:-1}
+      - ODYSSEUS_SCRIPT_HOST=${ODYSSEUS_SCRIPT_HOST:-localhost}
+      - ODYSSEUS_CHAT_UPLOAD_MAX_BYTES=${ODYSSEUS_CHAT_UPLOAD_MAX_BYTES:-10485760}
+      - ODYSSEUS_GALLERY_UPLOAD_MAX_BYTES=${ODYSSEUS_GALLERY_UPLOAD_MAX_BYTES:-104857600}
+      - ODYSSEUS_GALLERY_TRANSFORM_UPLOAD_MAX_BYTES=${ODYSSEUS_GALLERY_TRANSFORM_UPLOAD_MAX_BYTES:-26214400}
+      - ODYSSEUS_MEMORY_IMPORT_MAX_BYTES=${ODYSSEUS_MEMORY_IMPORT_MAX_BYTES:-10485760}
+      - ODYSSEUS_PERSONAL_UPLOAD_MAX_BYTES=${ODYSSEUS_PERSONAL_UPLOAD_MAX_BYTES:-26214400}
+      - ODYSSEUS_EMAIL_COMPOSE_UPLOAD_MAX_BYTES=${ODYSSEUS_EMAIL_COMPOSE_UPLOAD_MAX_BYTES:-26214400}
+      - ODYSSEUS_STT_MAX_AUDIO_BYTES=${ODYSSEUS_STT_MAX_AUDIO_BYTES:-26214400}
+      - ODYSSEUS_ICS_MAX_BYTES=${ODYSSEUS_ICS_MAX_BYTES:-10485760}
+      - ODYSSEUS_TTS_CACHE_MAX_BYTES=${ODYSSEUS_TTS_CACHE_MAX_BYTES:-}
+      - DATA_BRAVE_API_KEY=${DATA_BRAVE_API_KEY:-}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - GOOGLE_PSE_CX=${GOOGLE_PSE_CX:-}
+      - GOOGLE_OAUTH_CLIENT_ID=${GOOGLE_OAUTH_CLIENT_ID:-}
+      - GOOGLE_OAUTH_CLIENT_SECRET=${GOOGLE_OAUTH_CLIENT_SECRET:-}
+      - GOOGLE_OAUTH_REDIRECT_URI=${GOOGLE_OAUTH_REDIRECT_URI:-}
+      # Externally reachable origin for MCP OAuth callbacks. The container
+      # always listens on 7000 behind Coolify's Traefik and cannot see the
+      # public URL, so remote MCP OAuth needs this set to the public origin.
+      - OAUTH_REDIRECT_BASE_URL=${OAUTH_REDIRECT_BASE_URL:-}
+      - TAVILY_API_KEY=${TAVILY_API_KEY:-}
+      - SERPER_API_KEY=${SERPER_API_KEY:-}
+      # PUID / PGID — the user/group the container drops to before
+      # running uvicorn (entrypoint also chowns /app/data + /app/logs
+      # to match, so bind-mounted files stay editable from the host).
+      # 1000 is the default first user on most Linux installs. If your
+      # host user has a different id, override here or via .env, e.g.:
+      #   PUID=1001
+      #   PGID=1001
+      # Find yours with:  id -u  /  id -g
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      # Coolify recreates the container on every deploy and /app/.npm is not
+      # mounted, so keep npm/npx's cache on the persisted data volume.
+      - npm_config_cache=/app/data/npm-cache
+    depends_on:
+      searxng:
+        condition: service_healthy
+      chromadb:
+        condition: service_started
+    restart: unless-stopped
+
+  chromadb:
+    image: docker.io/chromadb/chroma:latest
+    volumes:
+      - chromadb-data:/chroma/chroma
+    environment:
+      - ANONYMIZED_TELEMETRY=FALSE
+    restart: unless-stopped
+
+  searxng:
+    # Pinned, not :latest — odysseus waits on searxng's healthcheck
+    # (depends_on: condition: service_healthy), so a broken upstream `latest`
+    # tag blocks the whole app from starting. 2026.6.2 crashes on boot with
+    # `KeyError: 'default_doi_resolver'`, failing the healthcheck (issue #1414).
+    # Bump this deliberately after verifying a newer tag boots clean.
+    image: docker.io/searxng/searxng:2026.5.31-7159b8aed
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        set -eu
+        if [ ! -s /etc/searxng/settings.yml ] || grep -q 'odysseus-local-searxng-json-2026-05-30\|__SEARXNG_SECRET__' /etc/searxng/settings.yml; then
+          secret="$${SEARXNG_SECRET:-}"
+          if [ -z "$$secret" ]; then
+            secret="$$(python -c 'import secrets; print(secrets.token_urlsafe(48))')"
+          fi
+          sed "s|__SEARXNG_SECRET__|$$secret|g" /tmp/searxng-settings.yml.template > /etc/searxng/settings.yml
+        fi
+        # Advisory: a settings file the migration cannot parse or rewrite must
+        # not be what stops searxng from booting. It explains itself on stderr
+        # and we carry on, letting searxng report anything genuinely wrong.
+        /usr/local/searxng/.venv/bin/python /tmp/migrate-searxng-settings.py /etc/searxng/settings.yml || true
+        exec /usr/local/searxng/entrypoint.sh
+    volumes:
+      - searxng-data:/etc/searxng
+      - ./config/searxng/settings.yml:/tmp/searxng-settings.yml.template:ro
+      - ./scripts/migrate_searxng_settings.py:/tmp/migrate-searxng-settings.py:ro
+    environment:
+      - SEARXNG_BASE_URL=http://localhost:8080/
+      - SEARXNG_SECRET=${SEARXNG_SECRET:-}
+    # The official searxng image runs as the non-root `searxng` user, but its
+    # entrypoint still needs to chown /etc/searxng on first boot, drop privs via
+    # su-exec, and (with our wrapper above) write settings.yml into the named
+    # volume. Without these capabilities the wrapper aborts at the redirection
+    # with EACCES and the container fails its healthcheck with permission
+    # errors during setup. Mirrors the cap set recommended by the upstream
+    # searxng-docker compose file. See issue #721.
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+      - DAC_OVERRIDE
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8080/', timeout=5).read(1)\""]
+      interval: 5s
+      timeout: 6s
+      retries: 20
+      start_period: 10s
+    restart: unless-stopped
+
+  telegram-bot:
+    # Telegram <-> Odysseus bridge (fork-only; integrations/telegram). Stdlib
+    # Python on a stock image, no build. Long-polls Telegram, so it needs no
+    # domain or published port. :8088 (/reminder, /health) is reachable only
+    # on the compose network, for Odysseus' "Webhook" reminder channel.
+    image: docker.io/library/python:3.12-slim
+    command: ["python", "-u", "/bot/odysseus_telegram_bot.py"]
+    expose:
+      - "8088"
+    volumes:
+      # Mount the directory, not the single file: Coolify registers a new
+      # string-form bind mount as a directory, so a file mount would become an
+      # empty directory on the first deploy (the same trap as the searxng
+      # mounts). A directory mount is created as such and then filled by the
+      # preserved repository copy.
+      - ./integrations/telegram:/bot:ro
+      - telegram-bot-data:/data
+    environment:
+      # From @BotFather. Empty = the service idles.
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      # Odysseus API token (Settings → Integrations → Claude Agent) with the
+      # chat scope plus the todos/calendar/memory scopes the bot should use.
+      - ODYSSEUS_TOKEN=${TELEGRAM_ODYSSEUS_TOKEN:-}
+      # Pin a model: ChatGPT Subscription gpt-6* currently fails on
+      # /api/v1/chat ("Unsupported parameter: temperature").
+      - ODYSSEUS_MODEL=${TELEGRAM_ODYSSEUS_MODEL:-gpt-5.6-sol}
+      - ODYSSEUS_URL=http://odysseus:7000
+      # Comma-separated Telegram chat ids. Empty = one-time pairing: the code
+      # is printed in this service's logs; send "/eslestir CODE" to the bot.
+      - TELEGRAM_ALLOWED_CHAT_IDS=${TELEGRAM_ALLOWED_CHAT_IDS:-}
+      # Optional bearer secret the Odysseus reminder webhook must send.
+      - TELEGRAM_REMINDER_SECRET=${TELEGRAM_REMINDER_SECRET:-}
+      - BOT_TIMEZONE=${BOT_TIMEZONE:-Europe/Istanbul}
+      - PYTHONDONTWRITEBYTECODE=1
+    depends_on:
+      odysseus:
+        condition: service_started
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8088/health', timeout=3).read(1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  searxng-data:
+  chromadb-data:
+  telegram-bot-data:
