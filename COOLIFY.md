@@ -18,7 +18,7 @@ SearXNG ayar şablonu, migration betiği ve Telegram botu.
 ## Kurulum
 
 1. **Kaynak:** Coolify'da New Resource → Public Repository
-   - URL: `https://github.com/wazzapsenk/odysseus-CoolifyEdition`
+   - URL: fork'unun GitHub adresi (`https://github.com/<kullanıcı>/<fork>`)
    - **Check Repository**'ye bas; branch `dev` olmalı.
 2. **Build:**
    - Build Pack: **Docker Compose**
@@ -33,9 +33,9 @@ SearXNG ayar şablonu, migration betiği ve Telegram botu.
      oluşur ve searxng hiçbir zaman healthy olmaz.
 4. **Domain:** `odysseus` servisine ekle.
    - Protocol: `https`
-   - Domain: `odysseus.burakkaan.dev`
+   - Domain: alan adın (örn. `odysseus.example.com`)
    - Port: `7000`. Bu konteyner portudur; dışarıdan erişim 443 üzerinden olur.
-5. **DNS:** `odysseus.burakkaan.dev` için sunucu IP'sine bir A kaydı ekle.
+5. **DNS:** Bu alan adı için sunucu IP'sine bir A kaydı ekle.
    Cloudflare kullanıyorsan sertifika alınana kadar kaydı "DNS only" bırak.
 6. **Değişkenler:**
 
@@ -45,10 +45,12 @@ SearXNG ayar şablonu, migration betiği ve Telegram botu.
    | `ODYSSEUS_ADMIN_USER` | Küçük harfe çevrilir. `api`, `demo`, `system`, `internal-tool` kullanılamaz |
    | `ODYSSEUS_ADMIN_PASSWORD` | En az 8 karakter. Sadece ilk açılışta, `auth.json` yokken kullanılır |
    | `SEARXNG_SECRET` | İsteğe bağlı. `openssl rand -hex 32` ile üretilebilir |
+   | `ALLOWED_ORIGINS` | Önerilir. Public adresin, örn. `https://odysseus.example.com` (CORS) |
+   | `OAUTH_REDIRECT_BASE_URL` | Uzak MCP OAuth kullanacaksan public adresin. Google MCP için boş bırak |
    | `TELEGRAM_*` | İsteğe bağlı; bkz. [Telegram botu](integrations/telegram/README.md) |
 
-   `ALLOWED_ORIGINS`, `SECURE_COOKIES` ve `OAUTH_REDIRECT_BASE_URL` compose
-   dosyasında doğru varsayılanlarla gelir. Bunlara dokunmana gerek yok.
+   Compose dosyasında hiçbir alan adı yazılı değil; adres sadece Coolify'daki
+   değişkenlerde durur. `SECURE_COOKIES` varsayılan olarak `true`.
 7. **Deploy.**
 8. **Model bağla:** Admin olarak giriş yap. **Add API Models** bölümünden
    Provider olarak `ChatGPT Subscription`'ı seç (device code ile girilir) ya da
@@ -74,9 +76,9 @@ SearXNG ayar şablonu, migration betiği ve Telegram botu.
 | `ChatGPT Subscription quota or rate limit was reached` | Plus kotası doldu (Codex ile paylaşılıyor). Sıfırlanmasını bekle |
 | Admin şifresi değişkenden değişmiyor | Beklenen davranış. Değişken sadece ilk açılışta okunur; şifreyi uygulama içinden değiştir |
 | Telegram botu cevap vermiyor | Coolify'da `telegram-bot` loglarına bak. `Idle:` satırları token'ın eksik ya da yanlış olduğunu söyler. `PAIRING MODE` satırı eşleştirme bekleniyor demektir |
-| Bot logunda `409 Conflict: terminated by other getUpdates request`, ardından "Stopped polling" | Aynı bot token'ını başka bir program (örn. OpenClaw) dinliyor. BotFather'dan Odysseus için ayrı bir bot aç |
+| Bot logunda `409 Conflict: terminated by other getUpdates request`, ardından "Stopped polling" | Aynı bot token'ını başka bir program dinliyor. BotFather'dan Odysseus için ayrı bir bot aç |
 | Integrations ekranında `JSON.parse: unexpected character` ve "No integrations configured" | Uygulama o sırada yeniden başlıyordu (Redeploy). Bir dakika bekleyip sayfayı yenile; entegrasyonlar silinmez |
-| Traefik logunda `Unable to obtain ACME certificate ... www.odysseus.burakkaan.dev` | DNS kaydı olmayan ek bir domain tanımlı. Ya Domains'ten kaldır ya da DNS kaydını ekle |
+| Traefik logunda `Unable to obtain ACME certificate ... www.<alan-adın>` | DNS kaydı olmayan ek bir domain tanımlı. Ya Domains'ten kaldır ya da DNS kaydını ekle |
 
 Boş klasörleri silmek için (sunucuda; `<uuid>`, Coolify'daki uygulama
 UUID'si). `rmdir` yalnızca boş klasörleri siler, `data/`'ya dokunmaz:
@@ -96,9 +98,9 @@ Kendisi MCP sunucusu olarak dışarıya açılmaz. Harici ajanlar `/api/codex/*`
 HTTP API'sini kullanır.
 
 **Ekleme:** **Settings → Integrations → Add Integration → MCP Tool Server**.
-Menüdeki diğer türler: API Service, CalDAV Calendar, Claude Agent, Codex Agent,
+Açılan "Add MCP Server" formu aşağıdaki alanları içerir. Menüdeki diğer
+türler: API Service, CalDAV Calendar, Claude Agent, Codex Agent,
 Contacts (CardDAV), Contacts Import, Email (IMAP/SMTP).
-("Add MCP Server" formu)
 
 | Alan | Açıklama |
 |---|---|
@@ -130,12 +132,13 @@ yeniden ekle.
 - **Kimlik doğrulama:** Sadece URL alınıyor, özel header veya sabit bearer token
   girilemiyor. OAuth gerektiren sunucularda (Notion, Linear vb.) OAuth akışı
   destekleniyor:
-  - Callback adresi: `https://odysseus.burakkaan.dev/api/mcp/oauth/callback`
+  - Coolify'da `OAUTH_REDIRECT_BASE_URL`'i public adresine ayarla. Callback
+    adresi `https://<alan-adın>/api/mcp/oauth/callback` olur.
   - Akışı tarayıcıda admin oturumu açıkken tamamla.
 - **Google MCP (Gmail/Calendar, Desktop App OAuth):** Google yalnızca loopback
   yönlendirme adresini kabul ediyor.
-  - Coolify'da `OAUTH_REDIRECT_BASE_URL=http://localhost:7000` yap. Değişkeni
-    boş bırakmak işe yaramaz; compose varsayılanı devreye girer.
+  - `OAUTH_REDIRECT_BASE_URL`'i boş bırak; uygulama loopback adresini
+    (`http://localhost:7000`) kullanır.
   - Akışı paste-back kutusuyla bitir.
   - Bu ayar, public callback isteyen diğer OAuth MCP'lerini bozar. İkisi aynı
     anda çalışmaz.
@@ -170,8 +173,8 @@ Birbirinden bağımsız iki skill türü var.
 
 - **Nereden alınır:** **Settings → Integrations → Add Integration → Claude Agent**
   ekranındaki kurulum komutları.
-- **Bu bilgisayardaki kurulum:**
-  - Skill: `C:\Users\senkr\.claude\skills\odysseus\`
+- **Kurulum yeri:**
+  - Skill: `~/.claude/skills/odysseus/` (Windows: `%USERPROFILE%\.claude\skills\odysseus\`)
   - `ODYSSEUS_URL` ve `ODYSSEUS_API_TOKEN`: `~/.claude/settings.json` →
     `env` bölümü
 - **Yetkiler:** Token'ın yetkileri aynı ekrandaki anahtarlarla yönetilir.
@@ -201,8 +204,8 @@ Upstream Odysseus'ta, 1.0.3 imajında doğrulanmış sorunlar:
      `resolve_session_auth(...)`'ı (`routes/chat_helpers.py:455`) çağırmıyor.
      Saklanan header'larla gidiyor.
    - **Geçici çözüm:** Telegram botu her turda yeni oturum açıp sonra siliyor.
-3. **`/api/v1/chat` model verilmezse listedeki ilk modeli seçiyor.** Bu hesapta
-   ilk model `gpt-6.1-sol` olduğu için 1. soruna düşüyor. Telegram botu bu
-   yüzden `TELEGRAM_ODYSSEUS_MODEL` ile modeli sabitliyor.
+3. **`/api/v1/chat` model verilmezse listedeki ilk modeli seçiyor.** İlk model
+   bir `gpt-6*` modeliyse 1. soruna düşüyor. Telegram botu bu yüzden
+   `TELEGRAM_ODYSSEUS_MODEL` ile modeli sabitliyor.
 
 Bu sorunlar upstream'e henüz bildirilmedi.

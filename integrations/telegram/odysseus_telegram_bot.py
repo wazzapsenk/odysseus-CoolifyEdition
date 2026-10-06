@@ -53,8 +53,8 @@ MAX_TURN_ASSISTANT_CHARS = 3_000
 PAIRING_MAX_FAILURES = 10
 REMINDER_MAX_BODY = 64 * 1024
 # Consecutive "terminated by other getUpdates request" conflicts before the
-# bot stops polling, so it never fights another program (e.g. OpenClaw) that
-# long-polls the same bot token.
+# bot stops polling, so it never fights another program that long-polls the
+# same bot token.
 MAX_POLL_CONFLICTS = 3
 TELEGRAM_TOKEN_RE = re.compile(r"\d{5,}:[A-Za-z0-9_-]{30,}")
 
@@ -1028,7 +1028,7 @@ class Bot:
                     conflicts += 1
                     if conflicts >= MAX_POLL_CONFLICTS:
                         log.error(
-                            "Another program is polling this bot token (for example OpenClaw), so "
+                            "Another program is polling this bot token, so "
                             "the two would keep disconnecting each other. Stopped polling. Create a "
                             "separate bot with @BotFather for Odysseus, set it as TELEGRAM_BOT_TOKEN "
                             "and redeploy."

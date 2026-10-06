@@ -22,8 +22,8 @@ yoktur, `python:3.12-slim` üzerinde çalışır.
 2. `/newbot` yaz; bota bir ad ve `_bot` ile biten bir kullanıcı adı ver.
 3. BotFather'ın verdiği token'ı kopyala. `123456:ABC...` biçimindedir.
 
-⚠️ **Odysseus için yeni, ayrı bir bot aç.** OpenClaw gibi başka bir programın
-kullandığı bot token'ını kullanma. Telegram'da bir botu aynı anda tek program
+⚠️ **Odysseus için yeni, ayrı bir bot aç.** Başka bir programın kullandığı bot
+token'ını kullanma. Telegram'da bir botu aynı anda tek program
 dinleyebilir; iki program aynı token'ı dinlerse birbirlerinin bağlantısını
 koparırlar (`409 Conflict: terminated by other getUpdates request`). Bot bunu
 fark edince 3 denemeden sonra kendini durdurur ve loga uyarı yazar.
