@@ -1280,6 +1280,8 @@ def _build_chatgpt_responses_payload(
     max_tokens: int,
     *,
     stream: bool = False,
+    tools: Optional[List[Dict]] = None,
+    tool_choice_none: bool = False,
 ) -> Dict:
     from src.chatgpt_subscription import build_responses_input
 
@@ -1293,6 +1295,21 @@ def _build_chatgpt_responses_payload(
     }
     if not _restricts_temperature(model):
         payload["temperature"] = temperature
+    if tools:
+        response_tools = []
+        for tool in tools:
+            if tool.get("type") == "function":
+                fn = tool.get("function") or tool
+                response_tools.append({
+                    "type": "function", "name": fn["name"],
+                    "description": fn.get("description") or "",
+                    "parameters": fn.get("parameters") or {"type": "object", "properties": {}},
+                    "strict": False,
+                })
+        if response_tools:
+            payload["tools"] = response_tools
+    if tool_choice_none:
+        payload["tool_choice"] = "none"
     # ChatGPT Subscription Codex API does not support max_output_tokens —
     # passing it returns HTTP 400 "Unsupported parameter: max_output_tokens".
     # Do not include it in the payload.
@@ -1365,7 +1382,7 @@ def _uses_max_completion_tokens(model: str) -> bool:
 # perfectly good model as failing. For these models we omit the field and let
 # the API use its required default. (gpt-4.5 is intentionally excluded — it is
 # not a reasoning model and accepts temperature normally.)
-_FIXED_TEMPERATURE_MODELS = ("o1", "o3", "o4", "gpt-5", "kimi-for-coding")
+_FIXED_TEMPERATURE_MODELS = ("o1", "o3", "o4", "gpt-5", "gpt-6", "kimi-for-coding")
 
 def _restricts_temperature(model: str) -> bool:
     """Check if a model rejects any non-default temperature."""
@@ -2625,7 +2642,7 @@ async def _stream_llm_inner(url: str, model: str, messages: List[Dict], temperat
     elif provider == "chatgpt-subscription":
         target_url = _normalize_chatgpt_subscription_url(url)
         h = _provider_headers(provider, headers)
-        payload = _build_chatgpt_responses_payload(model, messages_copy, temperature, max_tokens, stream=True)
+        payload = _build_chatgpt_responses_payload(model, messages_copy, temperature, max_tokens, stream=True, tools=tools, tool_choice_none=tool_choice_none)
     else:
         target_url = _normalize_openai_chat_url(url)
         payload = {
@@ -2684,6 +2701,7 @@ async def _stream_llm_inner(url: str, model: str, messages: List[Dict], temperat
         output_tokens = 0
         _responses_actual_model = ""
         _responses_model_announced = False
+        _responses_function_calls = {}
         try:
             client = _get_http_client()
             async with client.stream('POST', target_url, json=payload, headers=h, timeout=stream_timeout) as r:
@@ -2733,7 +2751,17 @@ async def _stream_llm_inner(url: str, model: str, messages: List[Dict], temperat
                                 yield _degenerate
                                 return
                             yield f'data: {json.dumps({"delta": delta})}\n\n'
+                    elif evt == "response.output_item.done":
+                        item = data.get("item") or {}
+                        if item.get("type") == "function_call" and item.get("call_id"):
+                            _responses_function_calls[item["call_id"]] = item
                     elif evt == "response.completed":
+                        for item in (data.get("response") or {}).get("output") or []:
+                            if item.get("type") == "function_call" and item.get("call_id"):
+                                _responses_function_calls[item["call_id"]] = item
+                        if _responses_function_calls:
+                            calls = [{"id": item["call_id"], "name": item["name"], "arguments": item.get("arguments") or "{}"} for item in _responses_function_calls.values()]
+                            yield f'data: {json.dumps({"type": "tool_calls", "calls": calls})}\n\n'
                         usage = (data.get("response") or {}).get("usage") or data.get("usage") or {}
                         if isinstance(usage, dict):
                             raw_input = (
